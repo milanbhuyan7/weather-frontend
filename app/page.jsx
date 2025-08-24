@@ -9,6 +9,8 @@ import SearchBar from "@/components/SearchBar"
 import CityWeatherCard from "@/components/CityWeatherCard"
 import ForecastCard from "@/components/ForecastCard"
 import { weatherAPI } from "@/lib/api"
+import { ChartContainer } from "@/components/ui/chart"
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts"
 
 export default function WeatherDashboard() {
   const [cities, setCities] = useState([])
@@ -16,10 +18,17 @@ export default function WeatherDashboard() {
   const [loading, setLoading] = useState(true)
   const [addingCity, setAddingCity] = useState(false)
   const { toast } = useToast()
+  const [allForecasts, setAllForecasts] = useState([])
 
   useEffect(() => {
     fetchInitialData()
   }, [])
+
+  useEffect(() => {
+    if (cities.length > 0) {
+      fetchAllForecasts()
+    }
+  }, [cities])
 
   const fetchInitialData = async () => {
     try {
@@ -40,6 +49,17 @@ export default function WeatherDashboard() {
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchAllForecasts = async () => {
+    try {
+      const forecasts = await Promise.all(
+        cities.map((city) => weatherAPI.getCityForecast(city.id).then(res => ({ city, forecast: res.data })))
+      )
+      setAllForecasts(forecasts)
+    } catch (error) {
+      console.error("Failed to fetch all forecasts for chart:", error)
     }
   }
 
@@ -115,6 +135,26 @@ export default function WeatherDashboard() {
 
   const isCityFavorite = (cityId) => {
     return preferences?.favorite_cities?.some((city) => city.id === cityId) || false
+  }
+
+  // Helper to merge forecasts for chart
+  const getMergedForecastData = () => {
+    if (!allForecasts.length) return []
+    // Collect all unique dates
+    const allDates = Array.from(
+      new Set(
+        allForecasts.flatMap(({ forecast }) => forecast.map(day => day.forecast_date))
+      )
+    ).sort()
+    // Build merged data: [{ date, CityA: temp, CityB: temp, ... }]
+    return allDates.map(date => {
+      const entry = { date }
+      allForecasts.forEach(({ city, forecast }) => {
+        const day = forecast.find(d => d.forecast_date === date)
+        entry[city.name] = day ? day.temperature_max : null
+      })
+      return entry
+    })
   }
 
   if (loading) {
@@ -204,10 +244,35 @@ export default function WeatherDashboard() {
               <div className="space-y-6">
                 <h2 className="text-xl font-semibold">5-Day Forecasts</h2>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {cities.slice(0, 4).map((city) => (
+                  {cities.map((city) => (
                     <ForecastCard key={`forecast-${city.id}`} city={city} />
                   ))}
                 </div>
+                {/* Line Chart for all cities */}
+                {allForecasts.length > 0 && (
+                  <div className="mt-8">
+                    <h2 className="text-xl font-semibold mb-2">5-Day Temperature Trends (All Cities)</h2>
+                    <ResponsiveContainer width="100%" height={350}>
+                      <LineChart data={getMergedForecastData()}>
+                        <XAxis dataKey="date" />
+                        <YAxis />
+                        <Tooltip />
+                        <Legend />
+                        {allForecasts.map(({ city }, idx) => (
+                          <Line
+                            key={city.id}
+                            type="monotone"
+                            dataKey={city.name}
+                            name={city.name}
+                            stroke={`hsl(${(idx * 60) % 360}, 70%, 50%)`}
+                            dot={true}
+                            connectNulls
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
               </div>
             )}
           </div>
